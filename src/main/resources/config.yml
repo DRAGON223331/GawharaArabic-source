@@ -1,0 +1,46 @@
+# ===== GawharaArabic 1.0 =====
+# Bedrock مبيعملش تشكيل للحروف العربي (أول/وسط/آخر) ولا بيعرف اتجاه RTL،
+# فالبلجن بيحوّل النص على السيرفر قبل ما يتبعت للاعب Bedrock بس.
+# لاعبين Java بيشوفوا النص الأصلي زي ما هو.
+
+# مين بيتصلّح له النص؟
+#   auto = لاعبين Bedrock بس (الافتراضي)
+#   all  = كل اللاعبين
+#   off  = محدش
+# ولكل لاعب يقدر يغيّر لنفسه بـ /arabicfix on|off|auto
+default-mode: auto
+
+# إزاي نعرف إن اللاعب Bedrock؟ (بيجرب كلهم بالترتيب)
+bedrock-detection:
+  # Floodgate API (لو مثبّت). ده الأدق.
+  use-floodgate: true
+  # Floodgate بيدّي لاعبين Bedrock UUID أول 64 bit فيه أصفار
+  uuid-check: true
+  # البريفكس بتاع Floodgate قبل الاسم (زي .Mokhtar8380). سيبه فاضي لو مش عايزه.
+  name-prefix: "."
+
+chat:
+  # يصلّح رسايل الشات اللي بيشوفها لاعبين Bedrock
+  enabled: true
+  # يصلّح أسماء اللاعبين العربي في الشات كمان
+  shape-names: true
+
+text:
+  # اتجاه الجملة الأساسي:
+  #   auto = أول حرف قوي يحدد (جملة إنجليزي بتبدأ LTR، وعربي بتبدأ RTL)
+  #   rtl  = دايمًا من اليمين لليسار
+  base-direction: rtl
+  # يشيل التشكيل (فتحة/ضمة/كسرة/سكون..) والتطويل لأن Bedrock بيعرضهم مربعات أحيانًا
+  strip-diacritics: true
+  # يحوّل الأرقام العربية (٠١٢٣) لأرقام عادية (0123)
+  western-digits: false
+
+messages:
+  prefix: "&8[&bعربي&8] &r"
+  usage: "&cاستخدم: &e/arabicfix <status|on|off|auto|test|reload>"
+  status: "&7وضعك: &e{mode}&7 | نوع اللاعب: &e{platform}&7 | الإصلاح شغال: &e{active}"
+  mode-set: "&aاتغيّر الوضع لـ &e{mode}&a."
+  test-header: "&7اختبار (قبل وبعد الإصلاح):"
+  reloaded: "&aاتعمل reload للإعدادات."
+  players-only: "الأمر ده للاعبين بس."
+  no-permission: "&cمعندكش صلاحية."
