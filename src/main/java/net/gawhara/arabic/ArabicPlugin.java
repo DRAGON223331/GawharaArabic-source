@@ -3,7 +3,11 @@ package net.gawhara.arabic;
 import io.papermc.paper.chat.ChatRenderer;
 import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.ComponentLike;
 import net.kyori.adventure.text.TextComponent;
+import net.kyori.adventure.text.TranslatableComponent;
+import net.kyori.adventure.text.TranslationArgument;
+import net.kyori.adventure.text.format.Style;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
@@ -57,6 +61,15 @@ public final class ArabicPlugin extends JavaPlugin implements Listener, TabExecu
     private volatile String namePrefix = ".";
     private volatile boolean chatEnabled = true;
     private volatile boolean shapeNames = true;
+    /** إعدادات الباكتات: الاتجاه auto عشان السطر كله (بريفكس إنجليزي + عربي) يترتب صح. */
+    private volatile ArabicShaper.Options lineOptions = new ArabicShaper.Options(true, false, false);
+    private volatile PacketSettings packets = new PacketSettings(false, true, true, true, true, true, true);
+    private AutoCloseable packetHook;
+
+    /** إيه اللي نصلّحه على مستوى الباكتات (لأي رسالة من أي بلجن). */
+    record PacketSettings(boolean enabled, boolean systemChat, boolean disguisedChat, boolean actionBar,
+                          boolean titles, boolean tabList, boolean windowTitles) {
+    }
 
     private final Map<UUID, Mode> overrides = new ConcurrentHashMap<>();
     private File dataFile;
@@ -96,7 +109,20 @@ public final class ArabicPlugin extends JavaPlugin implements Listener, TabExecu
                 c.getBoolean("text.western-digits", false),
                 !"auto".equalsIgnoreCase(c.getString("text.base-direction", "rtl")));
 
+        lineOptions = new ArabicShaper.Options(
+                options.stripDiacritics(), options.westernDigits(),
+                "rtl".equalsIgnoreCase(c.getString("packets.base-direction", "auto")));
+        packets = new PacketSettings(
+                c.getBoolean("packets.enabled", true),
+                c.getBoolean("packets.system-chat", true),
+                c.getBoolean("packets.disguised-chat", true),
+                c.getBoolean("packets.action-bar", true),
+                c.getBoolean("packets.titles", true),
+                c.getBoolean("packets.tab-list", true),
+                c.getBoolean("packets.window-titles", true));
+
         initFloodgate();
+        initPacketHook();
 
         overrides.clear();
         if (dataFile.exists()) {
@@ -127,6 +153,44 @@ public final class ArabicPlugin extends JavaPlugin implements Listener, TabExecu
         } catch (Throwable ignored) {
             floodgateApi = null; // Floodgate مش موجود، هنعتمد على الـ UUID/البريفكس
         }
+    }
+
+    private void initPacketHook() {
+        closeHook();
+        if (!packets.enabled()) {
+            return;
+        }
+        if (!getServer().getPluginManager().isPluginEnabled("packetevents")) {
+            getLogger().warning("PacketEvents مش مثبّت: رسايل البلجنات التانية (التاب/التايتل/system) مش هتتصلّح. "
+                    + "نزّله من Modrinth وحطه في plugins/.");
+            return;
+        }
+        try {
+            packetHook = new PacketHook(this);
+            getLogger().info("PacketEvents اتلقى: بصلّح الرسايل من كل البلجنات للاعبين Bedrock.");
+        } catch (Throwable t) {
+            getLogger().warning("مقدرتش أشغّل PacketEvents hook: " + t);
+        }
+    }
+
+    private void closeHook() {
+        if (packetHook != null) {
+            try {
+                packetHook.close();
+            } catch (Exception ignored) {
+                // مفيش حاجة نعملها
+            }
+            packetHook = null;
+        }
+    }
+
+    @Override
+    public void onDisable() {
+        closeHook();
+    }
+
+    PacketSettings packetSettings() {
+        return packets;
     }
 
     private void saveData() {
@@ -182,16 +246,97 @@ public final class ArabicPlugin extends JavaPlugin implements Listener, TabExecu
         return ArabicShaper.fix(text, options);
     }
 
-    /** يصلّح Component مع الحفاظ على الألوان والـ hover/click (كل جزء لوحده). */
+    /** يصلّح Component (للشات): بيحافظ على الألوان والـ hover/click. */
     public Component shape(Component c) {
+        return shapeWith(c, options);
+    }
+
+    /** يصلّح سطر كامل (رسالة نظام / أكشن بار / تاب...). الاتجاه بيتحدد من أول حرف قوي. */
+    public Component shapeLine(Component c) {
+        return shapeWith(c, lineOptions);
+    }
+
+    private record Piece(String text, Style style) {
+    }
+
+    private Component shapeWith(Component c, ArabicShaper.Options opt) {
+        List<Piece> pieces = new ArrayList<>();
+        if (flatten(c, Style.empty(), pieces)) {
+            return rebuild(c, pieces, opt);
+        }
+        return shapeRecursive(c, opt); // فيه Translatable/Keybind.. مش هنقدر نسطّحه
+    }
+
+    /** يجمع كل النصوص بأستايلاتها الفعلية (بعد الوراثة). false لو فيه نوع Component مش نصي. */
+    private boolean flatten(Component c, Style inherited, List<Piece> out) {
+        if (!(c instanceof TextComponent t)) {
+            return false;
+        }
+        Style eff = t.style().merge(inherited, Style.Merge.Strategy.IF_ABSENT_ON_TARGET);
+        if (!t.content().isEmpty()) {
+            out.add(new Piece(t.content(), eff));
+        }
+        for (Component kid : t.children()) {
+            if (!flatten(kid, eff, out)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private Component rebuild(Component original, List<Piece> pieces, ArabicShaper.Options opt) {
+        StringBuilder full = new StringBuilder();
+        List<Style> perChar = new ArrayList<>();
+        for (Piece p : pieces) {
+            full.append(p.text());
+            for (int i = 0; i < p.text().length(); i++) {
+                perChar.add(p.style());
+            }
+        }
+        String text = full.toString();
+        if (!ArabicShaper.containsArabic(text) || ArabicShaper.containsShaped(text)) {
+            return original; // مفيش عربي، أو اتصلّح قبل كده
+        }
+        ArabicShaper.Mapped m = ArabicShaper.fixMapped(text, opt);
+
+        List<Component> parts = new ArrayList<>();
+        StringBuilder cur = new StringBuilder();
+        Style curStyle = null;
+        for (int i = 0; i < m.text().length(); i++) {
+            Style st = perChar.get(m.src()[i]);
+            if (curStyle != null && !st.equals(curStyle)) {
+                parts.add(Component.text(cur.toString(), curStyle));
+                cur.setLength(0);
+            }
+            curStyle = st;
+            cur.append(m.text().charAt(i));
+        }
+        if (curStyle != null && cur.length() > 0) {
+            parts.add(Component.text(cur.toString(), curStyle));
+        }
+        return Component.empty().children(parts);
+    }
+
+    private Component shapeRecursive(Component c, ArabicShaper.Options opt) {
         if (c instanceof TextComponent t && ArabicShaper.containsArabic(t.content())) {
-            c = t.content(fix(t.content()));
+            c = t.content(ArabicShaper.fix(t.content(), opt));
+        }
+        if (c instanceof TranslatableComponent tc && !tc.arguments().isEmpty()) {
+            List<ComponentLike> args = new ArrayList<>();
+            for (TranslationArgument a : tc.arguments()) {
+                if (a.value() instanceof Component v) {
+                    args.add(shapeWith(v, opt));
+                } else {
+                    args.add(a);
+                }
+            }
+            c = tc.arguments(args);
         }
         List<Component> kids = c.children();
         if (!kids.isEmpty()) {
             List<Component> out = new ArrayList<>(kids.size());
             for (Component k : kids) {
-                out.add(shape(k));
+                out.add(shapeWith(k, opt));
             }
             c = c.children(out);
         }

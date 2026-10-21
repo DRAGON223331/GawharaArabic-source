@@ -1,4 +1,4 @@
-# GawharaArabic 1.0
+# GawharaArabic 1.1
 
 بلجن بيصلّح العربي للاعبين **Bedrock** (Geyser/Floodgate). Bedrock مبيعملش تشكيل للحروف (أول/وسط/آخر) ولا بيعرف اتجاه RTL،
 فبيعرض الحروف منفصلة ومعكوسة. البلجن بيعمل التشكيل والاتجاه على السيرفر **لكل مستقبل لوحده**،
@@ -11,7 +11,9 @@
 4. بيحافظ على الألوان والـ hover/click لأنه بيشتغل على الـ Component مش على نص مسطّح.
 
 ## التركيب
-- حط `GawharaArabic.jar` في `plugins/` وشغّل السيرفر. (Floodgate اختياري)
+- حط `GawharaArabic.jar` في `plugins/`.
+- **PacketEvents** (من Modrinth) في `plugins/` عشان رسايل كل البلجنات تتصلّح. من غيره الشات بس هو اللي بيشتغل.
+- Floodgate اختياري. Geyser لازم يكون بلجن على نفس السيرفر.
 - الإعدادات في `plugins/GawharaArabic/config.yml`.
 
 ## الأوامر
@@ -27,11 +29,12 @@ if (ar != null && ar.shouldFix(player)) {
     player.sendMessage(ar.shape(component)); // أو ar.fix("نص")
 }
 ```
-أي رسالة بتتبعت من بلجن تاني (زي رسالة `/register`) مش بتعدي على الشات، فلازم البلجن ده يستدعي `shape()` بنفسه.
+مع PacketEvents مش محتاج تعمل ده، الباكتات بتتصلّح لوحدها.
 
 ## المغطّى حاليًا
-- الشات (مع الحفاظ على فورمات LuckPerms وغيره) + رسايل البلجن نفسه.
-- **مش مغطّى:** Tab list، Scoreboard، Holograms، اللافتات، Titles/ActionBar، ورسايل البلجنات التانية. دول محتاجين packet-level (PacketEvents).
+- الشات (مع الحفاظ على فورمات LuckPerms وغيره).
+- مع PacketEvents: رسايل أي بلجن (system chat)، Title/Subtitle، ActionBar، Tab list header/footer، عناوين الـ GUI.
+- **مش مغطّى:** Scoreboard، Holograms، اللافتات، أسماء الـ items، البوس بار.
 
 ## ملاحظات
 - الرسايل الطويلة اللي بتنزل سطر جديد في Bedrock ممكن تتلخبط ترتيب أسطرها، لأن Bedrock هو اللي بيقطّع السطر بعد التحويل.

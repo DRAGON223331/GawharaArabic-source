@@ -1,4 +1,4 @@
-# ===== GawharaArabic 1.0 =====
+# ===== GawharaArabic 1.1 =====
 # Bedrock مبيعملش تشكيل للحروف العربي (أول/وسط/آخر) ولا بيعرف اتجاه RTL،
 # فالبلجن بيحوّل النص على السيرفر قبل ما يتبعت للاعب Bedrock بس.
 # لاعبين Java بيشوفوا النص الأصلي زي ما هو.
@@ -24,6 +24,20 @@ chat:
   enabled: true
   # يصلّح أسماء اللاعبين العربي في الشات كمان
   shape-names: true
+
+# اعتراض الباكتات: بيصلّح أي رسالة من أي بلجن (sendMessage / broadcast / AuthMe /register ...).
+# محتاج بلجن PacketEvents مثبّت على السيرفر (Modrinth: PacketEvents).
+# ملحوظة: لازم Geyser يكون بلجن على نفس السيرفر (مش Standalone/Proxy) عشان الباكتات تعدّي من هنا.
+packets:
+  enabled: true
+  # اتجاه السطر الكامل: auto (أول حرف قوي يحدد) أو rtl
+  base-direction: auto
+  system-chat: true      # رسايل النظام وأي sendMessage من البلجنات
+  disguised-chat: true   # رسايل الشات المتنكرة
+  action-bar: true
+  titles: true           # Title و Subtitle
+  tab-list: true         # Header / Footer بتاع التاب
+  window-titles: true    # عناوين الـ GUI والقوايم
 
 text:
   # اتجاه الجملة الأساسي:

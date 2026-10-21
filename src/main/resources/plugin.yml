@@ -1,10 +1,10 @@
 name: GawharaArabic
-version: 1.0.0
+version: 1.1.0
 main: net.gawhara.arabic.ArabicPlugin
 api-version: '26.1'
 author: GawharaSMP
-description: بيصلّح العربي (تشكيل الحروف + الاتجاه) للاعبين Bedrock في الشات
-softdepend: [floodgate]
+description: بيصلّح العربي (تشكيل الحروف + الاتجاه) للاعبين Bedrock في الشات ورسايل كل البلجنات
+softdepend: [floodgate, packetevents]
 commands:
   arabicfix:
     description: إعدادات إصلاح العربي

@@ -94,6 +94,21 @@ public final class ArabicShaper {
         return false;
     }
 
+    /** نص بصري + مكان كل حرف في النص الأصلي (عشان نحافظ على الألوان). */
+    public record Mapped(String text, int[] src) {
+    }
+
+    /** النص فيه Presentation Forms يعني اتعالج قبل كده (بنتجنب نعكسه مرتين). */
+    public static boolean containsShaped(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if ((c >= 0xFB50 && c <= 0xFDFF) || (c >= 0xFE70 && c <= 0xFEFF)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static String fix(String input) {
         return fix(input, Options.DEFAULT);
     }
@@ -102,21 +117,17 @@ public final class ArabicShaper {
         if (!containsArabic(input)) {
             return input;
         }
-        String shaped = shape(prepare(input, opt));
-        return reorder(shaped, opt.forceRtl());
+        return fixMapped(input, opt).text();
     }
 
-    // ---------------------------------------------------------------- تجهيز
-
-    private static boolean isDiacritic(char c) {
-        return (c >= 0x064B && c <= 0x065F) || c == 0x0670 || c == 0x0640 // تشكيل + ألف خنجرية + تطويل
-                || (c >= 0x06D6 && c <= 0x06ED);                          // علامات قرآنية
-    }
-
-    private static String prepare(String in, Options opt) {
-        StringBuilder sb = new StringBuilder(in.length());
-        for (int i = 0; i < in.length(); i++) {
-            char c = in.charAt(i);
+    /** زي fix بس بيرجّع كمان src[i] = index الحرف الأصلي اللي طلع منه الحرف i في الناتج. */
+    public static Mapped fixMapped(String input, Options opt) {
+        // 1) تجهيز (شيل التشكيل / تحويل الأرقام) مع تتبع المكان الأصلي
+        StringBuilder sb = new StringBuilder(input.length());
+        int[] idx = new int[input.length()];
+        int n = 0;
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
             if (opt.stripDiacritics() && isDiacritic(c)) {
                 continue;
             }
@@ -128,11 +139,64 @@ public final class ArabicShaper {
                 }
             }
             sb.append(c);
+            idx[n++] = i;
         }
-        return sb.toString();
+        String s = sb.toString();
+
+        // 2) التشكيل
+        StringBuilder shaped = new StringBuilder(s.length());
+        int[] sidx = new int[s.length()];
+        int m = 0;
+        boolean prevConnects = false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            char[] f = FORMS.get(c);
+            if (f == null) {
+                shaped.append(c);
+                sidx[m++] = idx[i];
+                prevConnects = false;
+                continue;
+            }
+            if (c == '\u0644' && i + 1 < s.length()) { // لام-ألف
+                char[] lig = lamAlef(s.charAt(i + 1));
+                if (lig != null) {
+                    shaped.append(prevConnects ? lig[1] : lig[0]);
+                    sidx[m++] = idx[i];
+                    prevConnects = false;
+                    i++;
+                    continue;
+                }
+            }
+            boolean joinsNext = false;
+            if (f[2] != 0 && i + 1 < s.length()) {
+                char[] nf = FORMS.get(s.charAt(i + 1));
+                joinsNext = nf != null && nf[1] != 0;
+            }
+            char glyph;
+            if (prevConnects && joinsNext) {
+                glyph = f[3];
+            } else if (prevConnects) {
+                glyph = f[1] != 0 ? f[1] : f[0];
+            } else if (joinsNext) {
+                glyph = f[2];
+            } else {
+                glyph = f[0];
+            }
+            shaped.append(glyph);
+            sidx[m++] = idx[i];
+            prevConnects = joinsNext;
+        }
+
+        // 3) الاتجاه (Bidi)
+        return reorder(shaped.toString(), sidx, opt.forceRtl());
     }
 
-    // ---------------------------------------------------------------- التشكيل
+    // ---------------------------------------------------------------- مساعدات
+
+    private static boolean isDiacritic(char c) {
+        return (c >= 0x064B && c <= 0x065F) || c == 0x0670 || c == 0x0640 // تشكيل + ألف خنجرية + تطويل
+                || (c >= 0x06D6 && c <= 0x06ED);                          // علامات قرآنية
+    }
 
     /** لام + ألف => {منفصل, آخر}، أو null. */
     private static char[] lamAlef(char next) {
@@ -144,54 +208,6 @@ public final class ArabicShaper {
             default -> null;
         };
     }
-
-    private static String shape(String s) {
-        StringBuilder out = new StringBuilder(s.length());
-        boolean prevConnects = false; // الحرف اللي قبله بيتوصل بالحالي؟
-
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            char[] f = FORMS.get(c);
-            if (f == null) {
-                out.append(c);
-                prevConnects = false;
-                continue;
-            }
-
-            // لام-ألف
-            if (c == '\u0644' && i + 1 < s.length()) {
-                char[] lig = lamAlef(s.charAt(i + 1));
-                if (lig != null) {
-                    out.append(prevConnects ? lig[1] : lig[0]);
-                    prevConnects = false;
-                    i++;
-                    continue;
-                }
-            }
-
-            boolean joinsNext = false;
-            if (f[2] != 0 && i + 1 < s.length()) {
-                char[] nf = FORMS.get(s.charAt(i + 1));
-                joinsNext = nf != null && nf[1] != 0;
-            }
-
-            char glyph;
-            if (prevConnects && joinsNext) {
-                glyph = f[3];
-            } else if (prevConnects) {
-                glyph = f[1] != 0 ? f[1] : f[0];
-            } else if (joinsNext) {
-                glyph = f[2];
-            } else {
-                glyph = f[0];
-            }
-            out.append(glyph);
-            prevConnects = joinsNext;
-        }
-        return out.toString();
-    }
-
-    // ---------------------------------------------------------------- الاتجاه (Bidi)
 
     private static char mirror(char c) {
         return switch (c) {
@@ -209,10 +225,10 @@ public final class ArabicShaper {
         };
     }
 
-    private static String reorder(String text, boolean forceRtl) {
+    private static Mapped reorder(String text, int[] src, boolean forceRtl) {
         Bidi bidi = new Bidi(text, forceRtl ? Bidi.DIRECTION_RIGHT_TO_LEFT : Bidi.DIRECTION_DEFAULT_RIGHT_TO_LEFT);
         if (bidi.isLeftToRight()) {
-            return text;
+            return new Mapped(text, java.util.Arrays.copyOf(src, text.length()));
         }
         int n = bidi.getRunCount();
         byte[] levels = new byte[n];
@@ -224,19 +240,32 @@ public final class ArabicShaper {
         Bidi.reorderVisually(levels, 0, runs, 0, n);
 
         StringBuilder out = new StringBuilder(text.length());
+        int[] outSrc = new int[text.length()];
+        int o = 0;
         for (int k = 0; k < n; k++) {
             int r = runs[k];
-            String run = text.substring(bidi.getRunStart(r), bidi.getRunLimit(r));
+            int a = bidi.getRunStart(r);
+            int b = bidi.getRunLimit(r);
             if ((bidi.getRunLevel(r) & 1) == 1) { // run عربي => نعكسه
-                StringBuilder rev = new StringBuilder(run).reverse();
-                for (int i = 0; i < rev.length(); i++) {
-                    rev.setCharAt(i, mirror(rev.charAt(i)));
+                for (int i = b - 1; i >= a; i--) {
+                    char ch = text.charAt(i);
+                    if (Character.isLowSurrogate(ch) && i - 1 >= a && Character.isHighSurrogate(text.charAt(i - 1))) {
+                        out.append(text.charAt(i - 1)).append(ch); // إيموجي: منقلبش الزوج
+                        outSrc[o++] = src[i - 1];
+                        outSrc[o++] = src[i];
+                        i--;
+                        continue;
+                    }
+                    out.append(mirror(ch));
+                    outSrc[o++] = src[i];
                 }
-                out.append(rev);
             } else {
-                out.append(run);
+                for (int i = a; i < b; i++) {
+                    out.append(text.charAt(i));
+                    outSrc[o++] = src[i];
+                }
             }
         }
-        return out.toString();
+        return new Mapped(out.toString(), outSrc);
     }
 }
